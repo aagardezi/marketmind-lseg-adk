@@ -7,18 +7,26 @@ from .tools.generaltools import get_current_date
 from .tools.finhubtools import symbol_lookup, company_news, company_profile, company_basic_financials, insider_sentiment, financials_reported, sec_filings
 from .tickhistorytool.tickhistory import getVWAP
 from .config import config
+import google.auth
 
+from google.adk.tools.bigquery import BigQueryCredentialsConfig
+from google.adk.tools.bigquery import BigQueryToolset
+from google.adk.tools.bigquery.config import BigQueryToolConfig
+from google.adk.tools.bigquery.config import WriteMode
 
+# Define a tool configuration to block any write operations
+tool_config = BigQueryToolConfig(write_mode=WriteMode.BLOCKED)
 
-search_agent = Agent(
-    name="search_agent",
-    # model="gemini-2.5-flash",
-    model=config.gemini_model,
-    description=(
-        "Agent to search about anything"
-    ),
-    instruction="I can answer your questions by searching the internet. Just ask me anything!",
-    tools=[google_search],
+application_default_credentials, _ = google.auth.default()
+print(application_default_credentials)
+
+credentials_config = BigQueryCredentialsConfig(
+    credentials=application_default_credentials
+)
+
+# Instantiate a BigQuery toolset
+bigquery_toolset = BigQueryToolset(
+    credentials_config=credentials_config, bigquery_tool_config=tool_config
 )
 
 symbol_to_ric_agent = Agent(
@@ -32,6 +40,39 @@ symbol_to_ric_agent = Agent(
         "convert the stock symbol to the RIC code and return the ric code in the response"
         "Get the RIC code for common stock traded on the New York Stock Exchange (NYSE)"
     ),
+    tools=[google_search],
+)
+
+
+# Agent Definition
+bigquery_agent = Agent(
+    model=config.gemini_model,
+    name="bigquery_agent",
+    description=(
+        "Agent to answer questions about BigQuery data and models and execute SQL queries."
+    ),
+    instruction="""\
+        You are a data science agent with access to several BigQuery tools.
+        Make use of those tools to answer the user's questions.
+        use the data in the genaillentsearch.lseg_tick_history_sg dataset to get info about the shares
+        If its a UK company then use the LSE_NORMALISED view 
+        If its a US company then use the NYS_NORMALISED view
+        Query the using the RIC code for the comapny
+        Use the Date_Time column for filter by date, always use the Date_Time filter in the query
+        When selecting Trades
+    """,
+    tools=[AgentTool(agent=symbol_to_ric_agent),bigquery_toolset],
+)
+
+
+search_agent = Agent(
+    name="search_agent",
+    # model="gemini-2.5-flash",
+    model=config.gemini_model,
+    description=(
+        "Agent to search about anything"
+    ),
+    instruction="I can answer your questions by searching the internet. Just ask me anything!",
     tools=[google_search],
 )
 
@@ -206,7 +247,7 @@ report_creation_agent = Agent(
      **Insider Sentiment:**
      {insider_sentiment_result}
 
-
+    In the analysis correlate the VAWP Result {vwap_result} with the news data {company_news_result} and explain how the news impacts the vwap
 
 
         **Comprehensive Report:** Your report should be comprehensive, detailed and contain the following sections:
@@ -246,7 +287,7 @@ data_retrieval_agent = ParallelAgent(
     #     "Use the financials_reported_agent to get financials reported"
     #     "Use the sec_filings_agent to get sec filings"
     # ),
-    sub_agents=[company_news_agent,company_profile_agent, company_basic_financials_agent, insider_sentiment_agent, sec_filings_agent, vwap_agent]
+    sub_agents=[company_news_agent,company_profile_agent, company_basic_financials_agent, insider_sentiment_agent, sec_filings_agent, vwap_agent, bigquery_agent]
 )
 
 
